@@ -97,7 +97,7 @@ static void      run(int, int, const char *);
 static void      setup(void);
 static void      sighandler(int);
 static int       tcpopen(const char *, const char *);
-static size_t    tokenize(char **, size_t, char *, int);
+static void      tokenize(char **, char *);
 static int       udsopen(const char *);
 static void      usage(void);
 
@@ -668,32 +668,49 @@ tcpopen(const char *host, const char *service)
 	return fd;
 }
 
-static size_t
-tokenize(char **result, size_t reslen, char *str, int delim)
+static void
+tokenize(char **result, char *str)
 {
+	char delim = ' ';
 	char *p = NULL, *n = NULL;
 	size_t i = 0;
+	size_t reslen = TOK_LAST - TOK_CMD;
+	size_t argoffset = TOK_ARG - TOK_CMD;
+	size_t textoffset = TOK_TEXT - TOK_CMD;
 
-	for (n = str; *n == ' '; n++)
-		;
+	/* find the start of the command */
+	for (n = str; *n == ' '; n++);
+
 	p = n;
 	while (*n != '\0') {
-		if (i >= reslen)
-			return 0;
-		if (i > TOK_CHAN - TOK_CMD && result[0] && strtol(result[0], NULL, 10) > 0)
-			delim = ':'; /* workaround non-RFC compliant messages */
-                if (i < TOK_TEXT - TOK_CMD && *n == delim) {
+		if (i >= reslen) {
+			return;
+		} else if (i > argoffset && *n == delim && result[0]
+		   && strtol(result[0], NULL, 10) > 0) {
+			/* numeric command message, don't process any further */
+			result[i++] = p;
+			return;
+		} else if (i < textoffset && *n == delim) {
 			*n = '\0';
 			result[i++] = p;
 			p = ++n;
+
+			if (*n == ':' && *(n+1) != '\0') {
+				/* colon indicates start of command text */
+				*n = '\0';
+				result[textoffset] = n + 1;
+				return;
+			}
 		} else {
 			n++;
 		}
 	}
+
 	/* add last entry */
 	if (i < reslen && p < n && p && *p)
 		result[i++] = p;
-	return i; /* number of tokens */
+
+	return;
 }
 
 static void
@@ -952,12 +969,7 @@ proc_server_cmd(int fd, char *buf)
 			*p = '\0';
 	}
 
-	if ((p = strchr(cmd, ':'))) {
-		*p = '\0';
-		argv[TOK_TEXT] = ++p;
-	}
-
-	tokenize(&argv[TOK_CMD], TOK_LAST - TOK_CMD, cmd, ' ');
+	tokenize(&argv[TOK_CMD], cmd);
 
 	if (!argv[TOK_CMD] || !strcmp("PONG", argv[TOK_CMD])) {
                 return;                
@@ -974,7 +986,12 @@ proc_server_cmd(int fd, char *buf)
                 proc_names(p, argv[TOK_TEXT]);
                 return;
         } else if (!strncmp("005", argv[TOK_CMD], 4)) {
-                /* the tokeniser doesn't split 005 lines properly */
+		/* the tokeniser can't split 005 lines properly while handling
+		 * other numerics in the general case */
+		snprintf(msg, sizeof(msg), "%s %s",
+			 	argv[TOK_ARG] ? argv[TOK_ARG] : "",
+				argv[TOK_TEXT] ? argv[TOK_TEXT] : "");
+		channel_print(channelmaster, msg);
                 cap_parse(argv[TOK_ARG]);
                 cap_parse(argv[TOK_TEXT]);
                 return;
@@ -996,8 +1013,9 @@ proc_server_cmd(int fd, char *buf)
 				argv[TOK_TEXT] ? argv[TOK_TEXT] : "");
         } else if (!argv[TOK_NICKSRV] || !argv[TOK_USER]) {
                 /* server message */
-		snprintf(msg, sizeof(msg), "%s%s",
-				argv[TOK_ARG] ? argv[TOK_ARG] : "",
+		snprintf(msg, sizeof(msg), "%s%s%s",
+			 	argv[TOK_ARG] ? argv[TOK_ARG] : "",
+			 	argv[TOK_ARG] && argv[TOK_TEXT] ? " " : "",
 				argv[TOK_TEXT] ? argv[TOK_TEXT] : "");
 		channel_print(channelmaster, msg);
 		return; /* don't process further */
