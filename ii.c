@@ -935,7 +935,7 @@ proc_server_cmd(int fd, char *buf)
 {
 	Channel *c;
 	const char *channel;
-	char *argv[TOK_LAST], *cmd = NULL, *p = NULL;
+	char *argv[TOK_LAST], *cmd = NULL, *p = NULL, *q = NULL;
         unsigned int i;
         int isnotice = 0, isprivmsg = 0;
 
@@ -970,21 +970,26 @@ proc_server_cmd(int fd, char *buf)
 	}
 
 	tokenize(&argv[TOK_CMD], cmd);
-
+	
 	if (!argv[TOK_CMD] || !strcmp("PONG", argv[TOK_CMD])) {
                 return;                
 	} else if (!strcmp("PING", argv[TOK_CMD])) {
 		snprintf(msg, sizeof(msg), "PONG %s\r\n", argv[TOK_TEXT]);
 		ewritestr(fd, msg);
                 return;
-        } else if (!strncmp("353", argv[TOK_CMD], 4)) {
-		p = strtok(argv[TOK_ARG]," ");
-		if(!(p = strtok(NULL," ")))
+	} else if (!strncmp("353", argv[TOK_CMD], 4)) {
+		p = argv[TOK_TEXT]; /* channel name */
+		if ((q = strchr(p,' ')) == NULL) /* space after channel name */
 			return;
-		snprintf(msg, sizeof(msg), "%s%s", argv[TOK_ARG] ? argv[TOK_ARG] : "", argv[TOK_TEXT] ? argv[TOK_TEXT] : "");
-                channel_print(channelmaster, msg);
-                proc_names(p, argv[TOK_TEXT]);
-                return;
+		*q++ = '\0'; /* terminate channel name and advance */
+		if ((q = strtok(q, ":")) == NULL) /* beginning of names list */
+			return;
+
+		snprintf(msg, sizeof(msg), "%s%s %s",
+			 argv[TOK_ARG] ? argv[TOK_ARG] : "", p, q);
+		channel_print(channelmaster, msg);
+		proc_names(p, q);
+		return;
         } else if (!strncmp("005", argv[TOK_CMD], 4)) {
 		/* the tokeniser can't split 005 lines properly while handling
 		 * other numerics in the general case */
