@@ -185,6 +185,10 @@ channel_normalize_name(char *s)
 {
 	char *p;
 
+	/* corner case for channelmaster */
+	if (*s == '\0')
+		return;
+
 	/* advance over the channel prefix char (&#) and any possible prefix
 	 * characters if we have received a message for opers
 	 * (e.g. NOTICE @#chan :hey ops) */
